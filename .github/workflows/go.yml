@@ -1,0 +1,37 @@
+name: Go
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Test
+      run: go test -v ./...
+
+    - name: Build K6
+      run: |
+        go version
+        pwd && ls -l
+          
+        go install go.k6.io/xk6/cmd/xk6@latest
+        MODULE_NAME=$(go list -m)
+          
+        xk6 build \
+          --output ./k6ext \
+          --with $MODULE_NAME="."
+        ./k6ext version
