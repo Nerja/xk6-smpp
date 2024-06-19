@@ -1,4 +1,4 @@
-package internal
+package smpp
 
 import (
 	"bufio"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/fiorix/go-smpp/smpp/pdu"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
+	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
 )
 
 type SMPPServer struct {
@@ -16,12 +17,17 @@ type SMPPServer struct {
 }
 
 var (
-	systemID = "magic-systemID"
-	password = "magic-password"
+	systemID  = "magic-systemID"
+	password  = "magic-password"
+	messageID = "magic-messageID"
+	recipient = "467097-----"
+	message   = "Hello magic world!"
+	tlvTag    = 5248
+	tlvValue  = "magic-tlv-value"
 )
 
 func TestBind(t *testing.T) {
-	testServer, err := newSMPPServer()
+	testServer, err := newSMPPServer(map[pdu.ID]func(pdu.Body) pdu.Body{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +38,44 @@ func TestBind(t *testing.T) {
 	}
 }
 
-func newSMPPServer() (*SMPPServer, error) {
+func TestSubmitMT(t *testing.T) {
+	testServer, err := newSMPPServer(map[pdu.ID]func(pdu.Body) pdu.Body{
+		pdu.SubmitSMID: func(p pdu.Body) pdu.Body {
+			resp := pdu.NewSubmitSMResp()
+			resp.Header().Seq = p.Header().Seq
+			resp.Fields().Set(pdufield.MessageID, messageID)
+			recipientMatches := p.Fields()[pdufield.DestinationAddr].String() == recipient
+			messageMatches := p.Fields()[pdufield.ShortMessage].String() == message
+			tlvMatches := p.TLVFields()[pdutlv.Tag(tlvTag)].String() == tlvValue
+			if !recipientMatches || !messageMatches || !tlvMatches {
+				resp.Header().Status = 8
+			} else {
+				resp.Header().Status = 0
+			}
+			return resp
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	smppClient := new(SMPPClientImpl)
+	fmt.Println(testServer.addr)
+	if err := smppClient.Bind(testServer.addr, testServer.addr, systemID, "systemType", password); err != nil {
+		t.Fatal(err)
+	}
+
+	receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
+		pdutlv.Tag(tlvTag): tlvValue,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receivedMessageID != messageID {
+		t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
+	}
+}
+
+func newSMPPServer(handlers map[pdu.ID]func(pdu.Body) pdu.Body) (*SMPPServer, error) {
 	server := new(SMPPServer)
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
 	if err != nil {
@@ -73,6 +116,9 @@ func newSMPPServer() (*SMPPServer, error) {
 						pduResp.Header().Seq = p.Header().Seq
 						pduResp.Header().Status = 0
 						pduResp = checkCredentials(p, pduResp)
+					}
+					if handler, ok := handlers[p.Header().ID]; ok {
+						pduResp = handler(p)
 					}
 					var b bytes.Buffer
 					if err := pduResp.SerializeTo(&b); err != nil {
