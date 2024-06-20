@@ -2,7 +2,7 @@ package smpp
 
 import (
 	"fmt"
-	"strings"
+	"regexp"
 	"sync"
 	"time"
 
@@ -11,6 +11,10 @@ import (
 	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
+)
+
+var (
+	drShortMessageRegex = regexp.MustCompile(`(\w+):\s*([^\s]+)`)
 )
 
 type SMPPClient interface {
@@ -107,10 +111,10 @@ func (s *SMPPClientImpl) processDeliverSM() {
 	for {
 		select {
 		case deliverSM := <-s.deliverSMChannel:
-			messageID := deliverSM.Fields()[pdufield.ShortMessage].String()
-			messageID = strings.Split(strings.Split(messageID, "id:")[1], " ")[0]
-			stat := strings.Split(strings.Split(deliverSM.Fields()[pdufield.ShortMessage].String(), "stat:")[1], " ")[0]
-			s.getDRChannel(messageID) <- stat
+			messageID, stat, ok := extractMessageIDAndStateFromShortMessage(deliverSM)
+			if ok {
+				s.getDRChannel(messageID) <- stat
+			}
 		case messageID := <-s.DRChannelMapCleanChannel:
 			s.DRChannelMapLock.Lock()
 			statesChannel, ok := s.DRChannelMap[messageID]
@@ -121,6 +125,23 @@ func (s *SMPPClientImpl) processDeliverSM() {
 			s.DRChannelMapLock.Unlock()
 		}
 	}
+}
+
+func extractMessageIDAndStateFromShortMessage(deliverSM pdu.Body) (string, string, bool) {
+	matches := drShortMessageRegex.FindAllStringSubmatch(deliverSM.Fields()[pdufield.ShortMessage].String(), -1)
+	result := make(map[string]string)
+	for _, match := range matches {
+		result[match[1]] = match[2]
+	}
+	messageID, ok := result["id"]
+	if !ok {
+		return "", "", false
+	}
+	stat, ok := result["stat"]
+	if !ok {
+		return "", "", false
+	}
+	return messageID, stat, true
 }
 
 func (s *SMPPClientImpl) getDRChannel(messageID string) chan string {
