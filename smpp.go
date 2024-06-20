@@ -14,6 +14,13 @@ type MTSubmitResponse struct {
 	Error     error
 }
 
+type AwaitDeliveryReceiptResponse struct {
+	MessageID  string
+	Success    bool
+	SeenStates []string
+	Error      error
+}
+
 func init() {
 	client := &K6SMPPClient{
 		SMPPClient: &SMPPClientImpl{},
@@ -30,5 +37,15 @@ func (c *K6SMPPClient) SubmitMT(destinationMSISDN string, text string, tlvs map[
 	return MTSubmitResponse{
 		MessageID: messageID,
 		Error:     err,
+	}
+}
+
+func (c *K6SMPPClient) AwaitDeliveryReceipt(messageID string, targetState string) AwaitDeliveryReceiptResponse {
+	success, seenStates, err := c.SMPPClient.AwaitDRs(messageID, targetState)
+	return AwaitDeliveryReceiptResponse{
+		MessageID:  messageID,
+		Success:    success,
+		SeenStates: seenStates,
+		Error:      err,
 	}
 }
