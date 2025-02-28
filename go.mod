@@ -4,11 +4,13 @@ go 1.22.4
 
 require (
 	github.com/fiorix/go-smpp v0.0.0-20210403173735-2894b96e70ba
+	github.com/stretchr/testify v1.9.0
 	go.k6.io/k6 v0.51.0
 )
 
 require (
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.9.0 // indirect
 	github.com/dop251/goja v0.0.0-20240220182346-e401ed450204 // indirect
 	github.com/fatih/color v1.16.0 // indirect
@@ -24,6 +26,7 @@ require (
 	github.com/mstoykov/atlas v0.0.0-20220811071828-388f114305dd // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.33.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/serenize/snaker v0.0.0-20201027110005-a7ad2135616e // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spf13/afero v1.1.2 // indirect
@@ -44,4 +47,5 @@ require (
 	google.golang.org/grpc v1.63.2 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/guregu/null.v3 v3.3.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

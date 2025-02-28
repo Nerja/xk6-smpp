@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"math/rand"
+
 	"github.com/fiorix/go-smpp/smpp"
 	"github.com/fiorix/go-smpp/smpp/pdu"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
@@ -18,56 +20,135 @@ var (
 )
 
 type SMPPClient interface {
-	Bind(transmitterAddr string, receiverAddr string, systemID string, systemType string, password string) error
+	Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error
 	SubmitMT(destinationMSISDN string, message string, tlvs map[pdutlv.Tag]interface{}) (string, error)
 	AwaitDRs(messageID string, targetState string) (bool, []string, error)
 }
 
 type SMPPClientImpl struct {
-	transmitter              *smpp.Transmitter
-	receiver                 *smpp.Receiver
+	transmitters             []*smpp.Transmitter
+	receivers                []*smpp.Receiver
 	deliverSMChannel         chan pdu.Body
 	DRChannelMapLock         sync.Mutex
 	DRChannelMap             map[string]chan string
 	DRChannelMapCleanChannel chan string
 }
 
-func (s *SMPPClientImpl) Bind(transmitterAddr string, receiverAddr string, systemID string, systemType string, password string) error {
-	transmitter := &smpp.Transmitter{
-		Addr:               transmitterAddr,
-		User:               systemID,
-		Passwd:             password,
-		SystemType:         systemType,
-		EnquireLink:        10 * time.Second,
-		EnquireLinkTimeout: 30 * time.Second,
-		RespTimeout:        10 * time.Second,
-		WindowSize:         5000,
+func (s *SMPPClientImpl) bindTransmitters(transmitterAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error {
+	s.transmitters = []*smpp.Transmitter{}
+
+	transmitterChannels := make(chan *smpp.Transmitter, len(transmitterAddrs)*connsPerTarget)
+	defer close(transmitterChannels)
+	errorChannels := make(chan error, len(transmitterAddrs)*connsPerTarget)
+	defer close(errorChannels)
+
+	for _, transmitterAddr := range transmitterAddrs {
+		for i := 0; i < connsPerTarget; i++ {
+			go func() {
+				transmitter := &smpp.Transmitter{
+					Addr:               transmitterAddr,
+					User:               systemID,
+					Passwd:             password,
+					SystemType:         systemType,
+					EnquireLink:        10 * time.Second,
+					EnquireLinkTimeout: 30 * time.Second,
+				}
+				var err error = nil
+				retryCnt := 0
+				for (err != nil || retryCnt == 0) && retryCnt < 10 {
+					err = bind(transmitter.Bind())
+					if err != nil {
+						time.Sleep(1 * time.Second)
+					}
+					retryCnt++
+				}
+				if err != nil {
+					errorChannels <- err
+					return
+				}
+				transmitterChannels <- transmitter
+			}()
+		}
 	}
-	s.deliverSMChannel = make(chan pdu.Body, 10000)
-	receiver := &smpp.Receiver{
-		Addr:               receiverAddr,
-		User:               systemID,
-		Passwd:             password,
-		SystemType:         systemType,
-		EnquireLink:        10 * time.Second,
-		EnquireLinkTimeout: 30 * time.Second,
-		Handler: func(p pdu.Body) {
-			if p.Header().ID == pdu.DeliverSMID {
-				s.deliverSMChannel <- p
-			}
-		},
+
+	for i := 0; i < len(transmitterAddrs)*connsPerTarget; i++ {
+		select {
+		case transmitter := <-transmitterChannels:
+			s.transmitters = append(s.transmitters, transmitter)
+		case err := <-errorChannels:
+			return err
+		}
 	}
-	if err := bind(transmitter.Bind()); err != nil {
+
+	return nil
+}
+
+func (s *SMPPClientImpl) Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error {
+	if err := s.bindTransmitters(transmitterAddrs, connsPerTarget, systemID, systemType, password); err != nil {
 		return err
 	}
-	if err := bind(receiver.Bind()); err != nil {
+	if err := s.bindReceivers(receiverAddrs, connsPerTarget, systemID, systemType, password); err != nil {
 		return err
 	}
-	s.transmitter = transmitter
-	s.receiver = receiver
+
 	s.DRChannelMapLock = sync.Mutex{}
 	s.DRChannelMap = make(map[string]chan string)
 	go s.processDeliverSM()
+	return nil
+}
+
+func (s *SMPPClientImpl) bindReceivers(receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error {
+	s.receivers = []*smpp.Receiver{}
+	s.deliverSMChannel = make(chan pdu.Body, 1000)
+
+	receiverChannels := make(chan *smpp.Receiver, len(receiverAddrs)*connsPerTarget)
+	defer close(receiverChannels)
+	errorChannels := make(chan error, len(receiverAddrs)*connsPerTarget)
+	defer close(errorChannels)
+
+	for _, receiverAddr := range receiverAddrs {
+		for i := 0; i < connsPerTarget; i++ {
+			go func() {
+				receiver := &smpp.Receiver{
+					Addr:               receiverAddr,
+					User:               systemID,
+					Passwd:             password,
+					SystemType:         systemType,
+					EnquireLink:        10 * time.Second,
+					EnquireLinkTimeout: 30 * time.Second,
+					Handler: func(p pdu.Body) {
+						if p.Header().ID == pdu.DeliverSMID {
+							s.deliverSMChannel <- p
+						}
+					},
+				}
+				var err error = nil
+				retryCnt := 0
+				for (err != nil || retryCnt == 0) && retryCnt < 10 {
+					err = bind(receiver.Bind())
+					if err != nil {
+						time.Sleep(1 * time.Second)
+					}
+					retryCnt++
+				}
+				if err != nil {
+					errorChannels <- err
+					return
+				}
+				receiverChannels <- receiver
+			}()
+		}
+	}
+
+	for i := 0; i < len(receiverAddrs)*connsPerTarget; i++ {
+		select {
+		case receiver := <-receiverChannels:
+			s.receivers = append(s.receivers, receiver)
+		case err := <-errorChannels:
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -77,7 +158,8 @@ func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, tlvs
 		Text:      pdutext.Raw(message),
 		TLVFields: tlvs,
 	}
-	resp, err := s.transmitter.Submit(&shortMessage)
+	transmitter := s.transmitters[rand.Intn(len(s.transmitters))]
+	resp, err := transmitter.Submit(&shortMessage)
 	if err != nil {
 		return "", err
 	}
