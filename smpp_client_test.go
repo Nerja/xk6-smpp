@@ -42,7 +42,7 @@ func TestBind(t *testing.T) {
 }
 
 func TestBindToFlappyTarget(t *testing.T) {
-	testServer, err := newSMPPServerWithInitialConnClose(map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{}, 1)
+	testServer, err := newSMPPServerWithInitialConnClose(map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{}, 1, 0*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,10 +190,10 @@ func TestAwaitDRs(t *testing.T) {
 }
 
 func newSMPPServer(handlers map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body) (*SMPPServer, error) {
-	return newSMPPServerWithInitialConnClose(handlers, 0)
+	return newSMPPServerWithInitialConnClose(handlers, 0, 0*time.Second)
 }
 
-func newSMPPServerWithInitialConnClose(handlers map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body, initialConnClose int) (*SMPPServer, error) {
+func newSMPPServerWithInitialConnClose(handlers map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body, initialConnClose int, respDelay time.Duration) (*SMPPServer, error) {
 	server := new(SMPPServer)
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
 	if err != nil {
@@ -215,8 +215,9 @@ func newSMPPServerWithInitialConnClose(handlers map[pdu.ID]func(pdu.Body, chan p
 				continue
 			}
 			if closeCnt < initialConnClose {
-				conn.Close()
 				closeCnt++
+				time.Sleep(respDelay)
+				conn.Close()
 				continue
 			}
 			go func() {

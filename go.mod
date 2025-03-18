@@ -1,6 +1,6 @@
 module github.com/Nerja/xk6-smpp
 
-go 1.22.4
+go 1.24
 
 require (
 	github.com/fiorix/go-smpp v0.0.0-20210403173735-2894b96e70ba

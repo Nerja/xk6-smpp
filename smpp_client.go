@@ -37,53 +37,71 @@ type SMPPClientImpl struct {
 func (s *SMPPClientImpl) bindTransmitters(transmitterAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error {
 	s.transmitters = []*smpp.Transmitter{}
 
-	transmitterChannels := make(chan *smpp.Transmitter, len(transmitterAddrs)*connsPerTarget)
-	defer close(transmitterChannels)
-	errorChannels := make(chan error, len(transmitterAddrs)*connsPerTarget)
-	defer close(errorChannels)
+	taskChannel := make(chan *smpp.Transmitter, len(transmitterAddrs)*connsPerTarget)
+	defer close(taskChannel)
 
 	for _, transmitterAddr := range transmitterAddrs {
 		for i := 0; i < connsPerTarget; i++ {
-			go func() {
-				transmitter := &smpp.Transmitter{
-					Addr:               transmitterAddr,
-					User:               systemID,
-					Passwd:             password,
-					SystemType:         systemType,
-					EnquireLink:        10 * time.Second,
-					EnquireLinkTimeout: 30 * time.Second,
-				}
+			taskChannel <- &smpp.Transmitter{
+				Addr:               transmitterAddr,
+				User:               systemID,
+				Passwd:             password,
+				SystemType:         systemType,
+				EnquireLink:        10 * time.Second,
+				EnquireLinkTimeout: 30 * time.Second,
+				RespTimeout:        10 * time.Second,
+			}
+		}
+	}
+
+	type TransmitterBindResult struct {
+		transmitter *smpp.Transmitter
+		err         error
+	}
+
+	transmitterBindResults := make(chan TransmitterBindResult, len(transmitterAddrs)*connsPerTarget)
+	defer close(transmitterBindResults)
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			for transmitter := range taskChannel {
 				var err error = nil
 				retryCnt := 0
-				for (err != nil || retryCnt == 0) && retryCnt < 10 {
+				for (err != nil || retryCnt == 0) && retryCnt < 2 {
 					err = bind(transmitter.Bind())
 					if err != nil {
 						time.Sleep(1 * time.Second)
+					} else {
+						break
 					}
 					retryCnt++
 				}
-				if err != nil {
-					errorChannels <- err
-					return
-				}
-				transmitterChannels <- transmitter
-			}()
-		}
+				transmitterBindResults <- TransmitterBindResult{transmitter, err}
+			}
+		}()
 	}
 
+	var err error = nil
 	for i := 0; i < len(transmitterAddrs)*connsPerTarget; i++ {
-		select {
-		case transmitter := <-transmitterChannels:
-			s.transmitters = append(s.transmitters, transmitter)
-		case err := <-errorChannels:
-			return err
+		transmitterBindResult := <-transmitterBindResults
+		if transmitterBindResult.err != nil {
+			err = transmitterBindResult.err
+			break
+		}
+		s.transmitters = append(s.transmitters, transmitterBindResult.transmitter)
+	}
+
+	if err != nil {
+		for _, transmitter := range s.transmitters {
+			transmitter.Close()
 		}
 	}
 
-	return nil
+	return err
 }
 
 func (s *SMPPClientImpl) Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error {
+	fmt.Println(transmitterAddrs, receiverAddrs, connsPerTarget, systemID, systemType, password)
 	if err := s.bindTransmitters(transmitterAddrs, connsPerTarget, systemID, systemType, password); err != nil {
 		return err
 	}
@@ -101,58 +119,77 @@ func (s *SMPPClientImpl) bindReceivers(receiverAddrs []string, connsPerTarget in
 	s.receivers = []*smpp.Receiver{}
 	s.deliverSMChannel = make(chan pdu.Body, 1000)
 
-	receiverChannels := make(chan *smpp.Receiver, len(receiverAddrs)*connsPerTarget)
-	defer close(receiverChannels)
-	errorChannels := make(chan error, len(receiverAddrs)*connsPerTarget)
-	defer close(errorChannels)
+	taskChannel := make(chan *smpp.Receiver, len(receiverAddrs)*connsPerTarget)
+	defer close(taskChannel)
 
 	for _, receiverAddr := range receiverAddrs {
 		for i := 0; i < connsPerTarget; i++ {
-			go func() {
-				receiver := &smpp.Receiver{
-					Addr:               receiverAddr,
-					User:               systemID,
-					Passwd:             password,
-					SystemType:         systemType,
-					EnquireLink:        10 * time.Second,
-					EnquireLinkTimeout: 30 * time.Second,
-					Handler: func(p pdu.Body) {
-						if p.Header().ID == pdu.DeliverSMID {
-							s.deliverSMChannel <- p
-						}
-					},
-				}
+			taskChannel <- &smpp.Receiver{
+				Addr:               receiverAddr,
+				User:               systemID,
+				Passwd:             password,
+				SystemType:         systemType,
+				EnquireLink:        10 * time.Second,
+				EnquireLinkTimeout: 30 * time.Second,
+				Handler: func(p pdu.Body) {
+					if p.Header().ID == pdu.DeliverSMID {
+						s.deliverSMChannel <- p
+					}
+				},
+			}
+		}
+	}
+
+	type ReceiverBindResult struct {
+		receiver *smpp.Receiver
+		err      error
+	}
+
+	receiverBindResults := make(chan ReceiverBindResult, len(receiverAddrs)*connsPerTarget)
+	defer close(receiverBindResults)
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			for receiver := range taskChannel {
 				var err error = nil
 				retryCnt := 0
-				for (err != nil || retryCnt == 0) && retryCnt < 10 {
+				for (err != nil || retryCnt == 0) && retryCnt < 2 {
 					err = bind(receiver.Bind())
 					if err != nil {
 						time.Sleep(1 * time.Second)
+					} else {
+						break
 					}
 					retryCnt++
 				}
-				if err != nil {
-					errorChannels <- err
-					return
-				}
-				receiverChannels <- receiver
-			}()
-		}
+				receiverBindResults <- ReceiverBindResult{receiver, err}
+			}
+		}()
 	}
 
+	var err error = nil
 	for i := 0; i < len(receiverAddrs)*connsPerTarget; i++ {
-		select {
-		case receiver := <-receiverChannels:
-			s.receivers = append(s.receivers, receiver)
-		case err := <-errorChannels:
-			return err
+		receiverBindResult := <-receiverBindResults
+		if receiverBindResult.err != nil {
+			err = receiverBindResult.err
+			break
+		}
+		s.receivers = append(s.receivers, receiverBindResult.receiver)
+	}
+
+	if err != nil {
+		for _, transmitter := range s.transmitters {
+			transmitter.Close()
 		}
 	}
 
-	return nil
+	return err
 }
 
 func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, tlvs map[pdutlv.Tag]interface{}) (string, error) {
+	if len(s.transmitters) == 0 {
+		return "", fmt.Errorf("no transmitters available")
+	}
 	shortMessage := smpp.ShortMessage{
 		Dst:       destinationMSISDN,
 		Text:      pdutext.Raw(message),
@@ -161,9 +198,11 @@ func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, tlvs
 	transmitter := s.transmitters[rand.Intn(len(s.transmitters))]
 	resp, err := transmitter.Submit(&shortMessage)
 	if err != nil {
+		fmt.Println(err)
 		return "", err
 	}
 	if resp.Resp().Header().Status != 0 {
+		fmt.Println(resp.Resp())
 		return "", fmt.Errorf("submit failed: %s", resp.Resp().Header().Status)
 	}
 	messageID := resp.Resp().Fields()[pdufield.MessageID].String()
@@ -240,8 +279,17 @@ func (s *SMPPClientImpl) getDRChannel(messageID string) chan string {
 }
 
 func bind(connStatusChan <-chan smpp.ConnStatus) error {
-	if status := <-connStatusChan; status.Error() != nil {
-		return status.Error()
+	select {
+	case status := <-connStatusChan:
+		if status.Status() != smpp.Connected {
+			return fmt.Errorf("unexpected status %s", status.Status())
+
+		}
+		if status.Error() != nil {
+			return status.Error()
+		}
+		return nil
+	case <-time.After(3 * time.Minute):
+		return fmt.Errorf("timeout waiting for bind response")
 	}
-	return nil
 }
