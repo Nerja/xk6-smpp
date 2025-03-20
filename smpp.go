@@ -28,8 +28,8 @@ func init() {
 	modules.Register("k6/x/smpp", client)
 }
 
-func (c *K6SMPPClient) Bind(transmitterAddr string, receiverAddr string, systemID string, systemType string, password string) error {
-	return c.SMPPClient.Bind(transmitterAddr, receiverAddr, systemID, systemType, password)
+func (c *K6SMPPClient) Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error {
+	return c.SMPPClient.Bind(transmitterAddrs, receiverAddrs, connsPerTarget, systemID, systemType, password)
 }
 
 func (c *K6SMPPClient) SubmitMT(destinationMSISDN string, text string, tlvs map[pdutlv.Tag]interface{}) MTSubmitResponse {

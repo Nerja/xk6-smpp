@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/fiorix/go-smpp/smpp/pdu"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
+	"github.com/stretchr/testify/assert"
 )
 
 type SMPPServer struct {
@@ -34,13 +36,40 @@ func TestBind(t *testing.T) {
 	}
 	smppClient := new(SMPPClientImpl)
 	fmt.Println(testServer.addr)
-	if err := smppClient.Bind(testServer.addr, testServer.addr, systemID, "systemType", password); err != nil {
+	if err := smppClient.Bind([]string{testServer.addr}, []string{testServer.addr}, 2, systemID, "systemType", password); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBindToFlappyTarget(t *testing.T) {
+	testServer, err := newSMPPServerWithInitialConnClose(map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{}, 1, 0*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smppClient := new(SMPPClientImpl)
+	fmt.Println(testServer.addr)
+	if err := smppClient.Bind([]string{testServer.addr}, []string{testServer.addr}, 2, systemID, "systemType", password); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBindToMultipleFQDNs(t *testing.T) {
+	addrs := []string{}
+	for i := 0; i < 10; i++ {
+		testServer, err := newSMPPServer(map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		addrs = append(addrs, testServer.addr)
+	}
+	smppClient := new(SMPPClientImpl)
+	if err := smppClient.Bind(addrs, addrs, 2, systemID, "systemType", password); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestSubmitMT(t *testing.T) {
-	testServer, err := newSMPPServer(map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
+	handlers := map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
 		pdu.SubmitSMID: func(p pdu.Body, _ chan pdu.Body) pdu.Body {
 			resp := pdu.NewSubmitSMResp()
 			resp.Header().Seq = p.Header().Seq
@@ -55,29 +84,54 @@ func TestSubmitMT(t *testing.T) {
 			}
 			return resp
 		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	}
+
+	addrs := []string{}
+	for i := 0; i < 10; i++ {
+		testServer, err := newSMPPServer(handlers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		addrs = append(addrs, testServer.addr)
 	}
 	smppClient := new(SMPPClientImpl)
-	fmt.Println(testServer.addr)
-	if err := smppClient.Bind(testServer.addr, testServer.addr, systemID, "systemType", password); err != nil {
+	if err := smppClient.Bind(addrs, addrs, 2, systemID, "systemType", password); err != nil {
 		t.Fatal(err)
 	}
 
-	receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
-		pdutlv.Tag(tlvTag): tlvValue,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receivedMessageID != messageID {
-		t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
+	for i := 0; i < 100; i++ {
+		receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
+			pdutlv.Tag(tlvTag): tlvValue,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if receivedMessageID != messageID {
+			t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
+		}
 	}
 }
 
+func TestSubmitMTToSlowServer(t *testing.T) {
+	handlers := map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
+		pdu.SubmitSMID: func(p pdu.Body, _ chan pdu.Body) pdu.Body {
+			time.Sleep(30 * time.Second)
+			return nil
+		},
+	}
+	testServer, err := newSMPPServer(handlers)
+	assert.Nil(t, err)
+	smppClient := new(SMPPClientImpl)
+	addrs := []string{testServer.addr}
+	err = smppClient.Bind(addrs, addrs, 1, systemID, "systemType", password)
+	assert.Nil(t, err)
+
+	_, err = smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{})
+	assert.NotNil(t, err)
+}
+
 func TestAwaitDRs(t *testing.T) {
-	testServer, err := newSMPPServer(map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
+	handler := map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
 		pdu.SubmitSMID: func(p pdu.Body, receiverChan chan pdu.Body) pdu.Body {
 			resp := pdu.NewSubmitSMResp()
 			resp.Header().Seq = p.Header().Seq
@@ -101,35 +155,45 @@ func TestAwaitDRs(t *testing.T) {
 
 			return resp
 		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	}
+	addrs := []string{}
+	for i := 0; i < 10; i++ {
+		testServer, err := newSMPPServer(handler)
+		if err != nil {
+			t.Fatal(err)
+		}
+		addrs = append(addrs, testServer.addr)
 	}
 	smppClient := new(SMPPClientImpl)
-	fmt.Println(testServer.addr)
-	if err := smppClient.Bind(testServer.addr, testServer.addr, systemID, "systemType", password); err != nil {
+	if err := smppClient.Bind(addrs, addrs, 2, systemID, "systemType", password); err != nil {
 		t.Fatal(err)
 	}
 
-	receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
-		pdutlv.Tag(tlvTag): tlvValue,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receivedMessageID != messageID {
-		t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
-	}
-	success, states, err := smppClient.AwaitDRs(receivedMessageID, "DELIVRD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !success {
-		t.Fatalf("Expected success, got failure with states seen: %v", states)
+	for i := 0; i < 100; i++ {
+		receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
+			pdutlv.Tag(tlvTag): tlvValue,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if receivedMessageID != messageID {
+			t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
+		}
+		success, states, err := smppClient.AwaitDRs(receivedMessageID, "DELIVRD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !success {
+			t.Fatalf("Expected success, got failure with states seen: %v", states)
+		}
 	}
 }
 
 func newSMPPServer(handlers map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body) (*SMPPServer, error) {
+	return newSMPPServerWithInitialConnClose(handlers, 0, 0*time.Second)
+}
+
+func newSMPPServerWithInitialConnClose(handlers map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body, initialConnClose int, respDelay time.Duration) (*SMPPServer, error) {
 	server := new(SMPPServer)
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
 	if err != nil {
@@ -144,9 +208,16 @@ func newSMPPServer(handlers map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body) (
 	receiverChan := make(chan pdu.Body, 100)
 
 	go func() {
+		closeCnt := 0
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
+				continue
+			}
+			if closeCnt < initialConnClose {
+				closeCnt++
+				time.Sleep(respDelay)
+				conn.Close()
 				continue
 			}
 			go func() {
