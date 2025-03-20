@@ -198,11 +198,9 @@ func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, tlvs
 	transmitter := s.transmitters[rand.Intn(len(s.transmitters))]
 	resp, err := transmitter.Submit(&shortMessage)
 	if err != nil {
-		fmt.Println(err)
 		return "", err
 	}
 	if resp.Resp().Header().Status != 0 {
-		fmt.Println(resp.Resp())
 		return "", fmt.Errorf("submit failed: %s", resp.Resp().Header().Status)
 	}
 	messageID := resp.Resp().Fields()[pdufield.MessageID].String()
