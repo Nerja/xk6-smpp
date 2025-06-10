@@ -20,13 +20,14 @@ type SMPPServer struct {
 }
 
 var (
-	systemID  = "magic-systemID"
-	password  = "magic-password"
-	messageID = "magic-messageID"
-	recipient = "467097-----"
-	message   = "Hello magic world!"
-	tlvTag    = 5248
-	tlvValue  = "magic-tlv-value"
+	systemID       = "magic-systemID"
+	password       = "magic-password"
+	messageID      = "magic-messageID"
+	recipient      = "467097-----"
+	message        = "Hello magic world!"
+	tlvTag         = 5248
+	tlvValue       = "magic-tlv-value"
+	testSourceAddr = "346760-----"
 )
 
 func TestBind(t *testing.T) {
@@ -69,15 +70,19 @@ func TestBindToMultipleFQDNs(t *testing.T) {
 }
 
 func TestSubmitMT(t *testing.T) {
+
 	handlers := map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
 		pdu.SubmitSMID: func(p pdu.Body, _ chan pdu.Body) pdu.Body {
 			resp := pdu.NewSubmitSMResp()
 			resp.Header().Seq = p.Header().Seq
 			resp.Fields().Set(pdufield.MessageID, messageID)
+
 			recipientMatches := p.Fields()[pdufield.DestinationAddr].String() == recipient
 			messageMatches := p.Fields()[pdufield.ShortMessage].String() == message
 			tlvMatches := p.TLVFields()[pdutlv.Tag(tlvTag)].String() == tlvValue
-			if !recipientMatches || !messageMatches || !tlvMatches {
+			sourceAddrMatches := p.Fields()[pdufield.SourceAddr].String() == testSourceAddr
+
+			if !recipientMatches || !messageMatches || !tlvMatches || !sourceAddrMatches {
 				resp.Header().Status = 8
 			} else {
 				resp.Header().Status = 0
@@ -100,7 +105,7 @@ func TestSubmitMT(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		receivedMessageID, err := smppClient.SubmitMT(recipient, message, "TestSourceAddr", map[pdutlv.Tag]interface{}{
+		receivedMessageID, err := smppClient.SubmitMT(recipient, message, testSourceAddr, map[pdutlv.Tag]interface{}{
 			pdutlv.Tag(tlvTag): tlvValue,
 		})
 		if err != nil {
@@ -186,82 +191,6 @@ func TestAwaitDRs(t *testing.T) {
 		if !success {
 			t.Fatalf("Expected success, got failure with states seen: %v", states)
 		}
-	}
-}
-
-func TestSourceAddressPropagation(t *testing.T) {
-	expectedSourceAddr := "TestSourceAddr123"
-
-	handlers := map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
-		pdu.SubmitSMID: func(p pdu.Body, _ chan pdu.Body) pdu.Body {
-			resp := pdu.NewSubmitSMResp()
-			resp.Header().Seq = p.Header().Seq
-			resp.Fields().Set(pdufield.MessageID, messageID)
-
-			// Detailed logging of the PDU
-			fmt.Println("==== BEGIN SMPP PDU DETAILS ====")
-			fmt.Printf("PDU Type: %s (0x%x)\n", p.Header().ID.String(), uint32(p.Header().ID))
-			fmt.Printf("PDU Sequence: %d\n", p.Header().Seq)
-			fmt.Printf("PDU Status: %d\n", p.Header().Status)
-
-			fmt.Println("\n-- Testing Extracting Fields --")
-			for _, f := range []pdufield.Name{
-				pdufield.SourceAddr,
-				pdufield.DestinationAddr,
-				pdufield.ShortMessage,
-			} {
-				if field := p.Fields()[f]; field != nil {
-					fmt.Printf("  %s: [%v]\n", f, field.String())
-				}
-			}
-
-			fmt.Println("\n-- TLV Fields --")
-			for tag, field := range p.TLVFields() {
-				fmt.Printf("  0x%04x: [%v]\n", uint16(tag), field.String())
-			}
-			fmt.Println("==== END SMPP PDU DETAILS ====")
-
-			// Check that source address in PDU matches what we sent
-			sourceAddrField := p.Fields()[pdufield.SourceAddr]
-			sourceAddr := ""
-			if sourceAddrField != nil {
-				sourceAddr = sourceAddrField.String()
-			}
-
-			sourceAddrMatches := sourceAddr == expectedSourceAddr
-
-			if !sourceAddrMatches {
-				t.Errorf("Source address mismatch: expected '%s', got '%s'",
-					expectedSourceAddr, sourceAddr)
-				resp.Header().Status = 8 // Error status
-			} else {
-				resp.Header().Status = 0 // Success
-			}
-			return resp
-		},
-	}
-
-	// Set up test server
-	testServer, err := newSMPPServer(handlers)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create client and bind
-	smppClient := new(SMPPClientImpl)
-	if err := smppClient.Bind([]string{testServer.addr}, []string{testServer.addr}, 1, systemID, "systemType", password); err != nil {
-		t.Fatal(err)
-	}
-
-	// Send message with the specified source address
-	receivedMessageID, err := smppClient.SubmitMT(recipient, message, expectedSourceAddr, map[pdutlv.Tag]interface{}{})
-	if err != nil {
-		t.Fatalf("Error sending message: %v", err)
-	}
-
-	// Verify message ID is received correctly
-	if receivedMessageID != messageID {
-		t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
 	}
 }
 
