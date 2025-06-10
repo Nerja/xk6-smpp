@@ -20,13 +20,14 @@ type SMPPServer struct {
 }
 
 var (
-	systemID  = "magic-systemID"
-	password  = "magic-password"
-	messageID = "magic-messageID"
-	recipient = "467097-----"
-	message   = "Hello magic world!"
-	tlvTag    = 5248
-	tlvValue  = "magic-tlv-value"
+	systemID       = "magic-systemID"
+	password       = "magic-password"
+	messageID      = "magic-messageID"
+	recipient      = "467097-----"
+	message        = "Hello magic world!"
+	tlvTag         = 5248
+	tlvValue       = "magic-tlv-value"
+	testSourceAddr = "346760-----"
 )
 
 func TestBind(t *testing.T) {
@@ -69,15 +70,19 @@ func TestBindToMultipleFQDNs(t *testing.T) {
 }
 
 func TestSubmitMT(t *testing.T) {
+
 	handlers := map[pdu.ID]func(pdu.Body, chan pdu.Body) pdu.Body{
 		pdu.SubmitSMID: func(p pdu.Body, _ chan pdu.Body) pdu.Body {
 			resp := pdu.NewSubmitSMResp()
 			resp.Header().Seq = p.Header().Seq
 			resp.Fields().Set(pdufield.MessageID, messageID)
+
 			recipientMatches := p.Fields()[pdufield.DestinationAddr].String() == recipient
 			messageMatches := p.Fields()[pdufield.ShortMessage].String() == message
 			tlvMatches := p.TLVFields()[pdutlv.Tag(tlvTag)].String() == tlvValue
-			if !recipientMatches || !messageMatches || !tlvMatches {
+			sourceAddrMatches := p.Fields()[pdufield.SourceAddr].String() == testSourceAddr
+
+			if !recipientMatches || !messageMatches || !tlvMatches || !sourceAddrMatches {
 				resp.Header().Status = 8
 			} else {
 				resp.Header().Status = 0
@@ -100,7 +105,7 @@ func TestSubmitMT(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
+		receivedMessageID, err := smppClient.SubmitMT(recipient, message, testSourceAddr, map[pdutlv.Tag]interface{}{
 			pdutlv.Tag(tlvTag): tlvValue,
 		})
 		if err != nil {
@@ -126,7 +131,7 @@ func TestSubmitMTToSlowServer(t *testing.T) {
 	err = smppClient.Bind(addrs, addrs, 1, systemID, "systemType", password)
 	assert.Nil(t, err)
 
-	_, err = smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{})
+	_, err = smppClient.SubmitMT(recipient, message, "TestSourceAddr", map[pdutlv.Tag]interface{}{})
 	assert.NotNil(t, err)
 }
 
@@ -170,7 +175,7 @@ func TestAwaitDRs(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		receivedMessageID, err := smppClient.SubmitMT(recipient, message, map[pdutlv.Tag]interface{}{
+		receivedMessageID, err := smppClient.SubmitMT(recipient, message, "TestSourceAddr", map[pdutlv.Tag]interface{}{
 			pdutlv.Tag(tlvTag): tlvValue,
 		})
 		if err != nil {
