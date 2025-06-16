@@ -32,11 +32,18 @@ func (c *K6SMPPClient) Bind(transmitterAddrs []string, receiverAddrs []string, c
 	return c.SMPPClient.Bind(transmitterAddrs, receiverAddrs, connsPerTarget, systemID, systemType, password)
 }
 
-func (c *K6SMPPClient) SubmitMT(destinationMSISDN string, text string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}) MTSubmitResponse {
-	messageID, err := c.SMPPClient.SubmitMT(destinationMSISDN, text, sourceAddr, tlvs)
+// Modify the SubmitMT wrapper function
+func (c *K6SMPPClient) SubmitMT(destinationMSISDN string, text string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}, registeredDelivery uint8) MTSubmitResponse {
+	messageID, err := c.SMPPClient.SubmitMT(destinationMSISDN, text, sourceAddr, tlvs, registeredDelivery)
+	if err != nil {
+		return MTSubmitResponse{
+			MessageID: "",
+			Error:     err,
+		}
+	}
 	return MTSubmitResponse{
 		MessageID: messageID,
-		Error:     err,
+		Error:     nil,
 	}
 }
 

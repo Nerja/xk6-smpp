@@ -21,7 +21,7 @@ var (
 
 type SMPPClient interface {
 	Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error
-	SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}) (string, error)
+	SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}, registeredDelivery uint8) (string, error)
 	AwaitDRs(messageID string, targetState string) (bool, []string, error)
 }
 
@@ -186,7 +186,7 @@ func (s *SMPPClientImpl) bindReceivers(receiverAddrs []string, connsPerTarget in
 	return err
 }
 
-func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}) (string, error) {
+func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}, registeredDelivery uint8) (string, error) {
 	if len(s.transmitters) == 0 {
 		return "", fmt.Errorf("no transmitters available")
 	}
@@ -196,7 +196,9 @@ func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, sour
 		Dst:       destinationMSISDN,
 		Text:      pdutext.Raw(message),
 		TLVFields: tlvs,
+		Register:  pdufield.DeliverySetting(registeredDelivery),
 	}
+
 	transmitter := s.transmitters[rand.Intn(len(s.transmitters))]
 	resp, err := transmitter.Submit(&shortMessage)
 	if err != nil {
