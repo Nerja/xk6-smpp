@@ -107,7 +107,7 @@ func TestSubmitMT(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		receivedMessageID, err := smppClient.SubmitMT(recipient, message, testSourceAddr, map[pdutlv.Tag]interface{}{
 			pdutlv.Tag(tlvTag): tlvValue,
-		})
+		}, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +131,7 @@ func TestSubmitMTToSlowServer(t *testing.T) {
 	err = smppClient.Bind(addrs, addrs, 1, systemID, "systemType", password)
 	assert.Nil(t, err)
 
-	_, err = smppClient.SubmitMT(recipient, message, "TestSourceAddr", map[pdutlv.Tag]interface{}{})
+	_, err = smppClient.SubmitMT(recipient, message, "TestSourceAddr", map[pdutlv.Tag]interface{}{}, 1)
 	assert.NotNil(t, err)
 }
 
@@ -177,7 +177,7 @@ func TestAwaitDRs(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		receivedMessageID, err := smppClient.SubmitMT(recipient, message, "TestSourceAddr", map[pdutlv.Tag]interface{}{
 			pdutlv.Tag(tlvTag): tlvValue,
-		})
+		}, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
