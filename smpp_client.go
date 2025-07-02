@@ -23,6 +23,7 @@ type SMPPClient interface {
 	Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error
 	SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}, registeredDelivery uint8) (string, error)
 	AwaitDRs(messageID string, targetState string) (bool, []string, error)
+	Unbind() error
 }
 
 type SMPPClientImpl struct {
@@ -294,4 +295,23 @@ func bind(connStatusChan <-chan smpp.ConnStatus) error {
 	case <-time.After(3 * time.Minute):
 		return fmt.Errorf("timeout waiting for bind response")
 	}
+}
+
+func (s *SMPPClientImpl) Unbind() error {
+	var firstErr error
+	// Unbind transmitters
+	for _, tx := range s.transmitters {
+		if err := tx.Unbind(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		tx.Close()
+	}
+	// Unbind receivers
+	for _, rx := range s.receivers {
+		if err := rx.Unbind(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		rx.Close()
+	}
+	return firstErr
 }

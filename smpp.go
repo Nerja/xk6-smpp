@@ -50,3 +50,20 @@ func (c *K6SMPPClient) AwaitDeliveryReceipt(messageID string, targetState string
 		Error:      err,
 	}
 }
+
+func (c *K6SMPPClient) Unbind() error {
+	return c.SMPPClient.Unbind()
+}
+
+func (c *K6SMPPClient) Exports() modules.Exports {
+	return modules.Exports{
+		Named: map[string]interface{}{
+			"bind":                 c.Bind,
+			"submitMT":             c.SubmitMT,
+			"awaitDeliveryReceipt": c.AwaitDeliveryReceipt,
+			"unbind":               c.Unbind,
+		},
+	}
+}
+
+var _ modules.Instance = &K6SMPPClient{}
