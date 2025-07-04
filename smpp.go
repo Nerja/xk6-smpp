@@ -42,7 +42,8 @@ func (c *K6SMPPClient) SubmitMT(destinationMSISDN string, text string, sourceAdd
 }
 
 func (c *K6SMPPClient) AwaitDeliveryReceipt(messageID string, targetState string) AwaitDeliveryReceiptResponse {
-	success, seenStates, err := c.SMPPClient.AwaitDRs(messageID, targetState)
+	timeoutSeconds := 10 // default
+	success, seenStates, err := c.SMPPClient.AwaitDRs(messageID, targetState, timeoutSeconds)
 	return AwaitDeliveryReceiptResponse{
 		MessageID:  messageID,
 		Success:    success,
