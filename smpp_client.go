@@ -22,7 +22,7 @@ var (
 type SMPPClient interface {
 	Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error
 	SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}, registeredDelivery uint8) (string, error)
-	AwaitDRs(messageID string, targetState string) (bool, []string, error)
+	AwaitDRs(messageID string, targetState string, timeoutSeconds int) (bool, []string, error)
 }
 
 type SMPPClientImpl struct {
