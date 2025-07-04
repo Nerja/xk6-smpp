@@ -22,7 +22,7 @@ var (
 type SMPPClient interface {
 	Bind(transmitterAddrs []string, receiverAddrs []string, connsPerTarget int, systemID string, systemType string, password string) error
 	SubmitMT(destinationMSISDN string, message string, sourceAddr string, tlvs map[pdutlv.Tag]interface{}, registeredDelivery uint8) (string, error)
-	AwaitDRs(messageID string, targetState string) (bool, []string, error)
+	AwaitDRs(messageID string, targetState string, timeoutSeconds int) (bool, []string, error)
 }
 
 type SMPPClientImpl struct {
@@ -211,7 +211,7 @@ func (s *SMPPClientImpl) SubmitMT(destinationMSISDN string, message string, sour
 	return messageID, nil
 }
 
-func (s *SMPPClientImpl) AwaitDRs(messageID string, targetState string) (bool, []string, error) {
+func (s *SMPPClientImpl) AwaitDRs(messageID string, targetState string, timeoutSeconds int) (bool, []string, error) {
 	seenStates := []string{}
 	messageStateChannel := s.getDRChannel(messageID)
 	for {
@@ -224,7 +224,7 @@ func (s *SMPPClientImpl) AwaitDRs(messageID string, targetState string) (bool, [
 			if messageState == targetState {
 				return true, seenStates, nil
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(time.Duration(timeoutSeconds) * time.Second):
 			return false, seenStates, nil
 		}
 	}
