@@ -184,7 +184,7 @@ func TestAwaitDRs(t *testing.T) {
 		if receivedMessageID != messageID {
 			t.Fatalf("Expected message ID '%s', got '%s'", messageID, receivedMessageID)
 		}
-		success, states, err := smppClient.AwaitDRs(receivedMessageID, "DELIVRD", 10)
+		success, states, err := smppClient.AwaitDRs(receivedMessageID, "DELIVRD")
 		if err != nil {
 			t.Fatal(err)
 		}
